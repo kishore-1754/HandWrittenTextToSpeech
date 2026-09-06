@@ -17,6 +17,8 @@ import soundfile as sf
 import sounddevice as sd
 
 ## Module imports for TrOCR
+from PIL import Image
+from transformers import TrOCRProcessor,VisionEncoderDecoderModel
 
 class LoadModels:
     ## Defining base path for portability
@@ -32,7 +34,7 @@ class LoadModels:
    ## Constructor
     def __init__(self):
         self.Indic=self.IndicLoader()
-        self.TrOCR=None
+        self.TrOCR=self.LoadOCR()
         self.Rasa=self.RasaLoader()
 
     ## INDIC Model Loader
@@ -142,7 +144,7 @@ class LoadModels:
             ## Check if audio was generated
             if len(Audio.samples)>0:
                 ## Trim the samples from the list to remove the noise from the end
-                TrimSize=int(Audio.sample_rate*0.45)
+                TrimSize=int(Audio.sample_rate*0.456)
                 ## Generate audio in RAM
                 AudioBuffer=io.BytesIO()
                 ## Write audio into a Wav format for sending
@@ -152,13 +154,39 @@ class LoadModels:
                 return AudioBuffer
             else: raise RuntimeError("Failed to generate audio")
 
+#_________________________________________________________________________________________________________________________________________________________
+    ## TROCR PIPELINE
+    TrPath=os.path.join(BaseDirectory,"models","OCR","trocr-small-handwritten")
+    ## Method to load the model
+    def LoadOCR(self):
+        ## Load processor and prevent the method from downloading it online
+        processor=TrOCRProcessor.from_pretrained(self.TrPath,local_files_only=True)
+        ## Load the Model and prevent method from downloading it online
+        OCR=VisionEncoderDecoderModel.from_pretrained(self.TrPath,local_files_only=True)
+        return {"processor":processor,"model":OCR}
 
+    ## Method to use the OCR model
+    def OCR(self,Input="Sample.png"):
+        ## Convert the image to RGB format because OCR processor accepts RGB
+        image=Image.open(Input).convert("RGB")
+        ## Preprocess the image using processor 
+        ## And convert the image into a 4 dimensional matrix (tensor )in format compatible with pytorch (pt)
+        ## Returns [Batch_Size, Channels, Height, Width] as matrix
+        pixels=self.TrOCR["processor"](images=image,return_tensors="pt").pixel_values
+        ## Generate integer IDs from the image
+        GeneratedIDs=self.TrOCR["model"].generate(pixels)
+        ## Decode the IDs into characters and extract text from the output list
+        OutputText=self.TrOCR["processor"].batch_decode(GeneratedIDs,skip_special_tokens=True)[0]
+        return OutputText
+        
 
 if __name__ == "__main__":
     start=time.perf_counter()
     Object=LoadModels()
     LoadTime=time.perf_counter()
-    test=Object.Translator(["Hello, brother, I hope you are doing well."])
+    testText=Object.OCR()
+    OCRTime=time.perf_counter()
+    test=Object.Translator([testText])
     translationTime=time.perf_counter()
     print(test[0])
     ## Get data from the Buffer
@@ -166,6 +194,7 @@ if __name__ == "__main__":
     ## Play the audio
     TTSTime=time.perf_counter()
     sd.play(Content,samplerate=sampleRate)
+    print(f"Sample Rate:{sampleRate}")
     sd.wait()
-    print(f"Time to Load models:{LoadTime-start}\nTranslation Time: {translationTime-LoadTime}\nTTS Time:{TTSTime-translationTime}")
+    print(f"Time to Load models:{LoadTime-start}\nOCR Time:{OCRTime-LoadTime}\nTranslation Time: {translationTime-LoadTime}\nTTS Time:{TTSTime-translationTime}")
     
