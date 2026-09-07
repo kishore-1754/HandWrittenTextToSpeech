@@ -20,6 +20,7 @@ import sounddevice as sd
 from PIL import Image
 from transformers import TrOCRProcessor,VisionEncoderDecoderModel
 
+
 class LoadModels:
     ## Defining base path for portability
     BaseDirectory=os.path.dirname(os.path.abspath(__file__))
@@ -160,15 +161,28 @@ class LoadModels:
     ## Method to load the model
     def LoadOCR(self):
         ## Load processor and prevent the method from downloading it online
-        processor=TrOCRProcessor.from_pretrained(self.TrPath,local_files_only=True)
+        processor=TrOCRProcessor.from_pretrained(self.TrPath,local_files_only=True,use_fast=True)
         ## Load the Model and prevent method from downloading it online
         OCR=VisionEncoderDecoderModel.from_pretrained(self.TrPath,local_files_only=True)
         return {"processor":processor,"model":OCR}
 
     ## Method to use the OCR model
-    def OCR(self,Input="Sample.png"):
-        ## Convert the image to RGB format because OCR processor accepts RGB
-        image=Image.open(Input).convert("RGB")
+    def OCR(self,Input):
+        ## Load from path
+        if isinstance(Input,str):
+            image=Image.open(Input).convert("RGB")
+
+        ## Load the image to RAM and convert the image to RGB format because OCR processor accepts RGB
+        elif isinstance(Input,io.BytesIO):
+            Input.seek(0)
+            image=Image.open(Input).convert("RGB")
+
+        ## Load the image if it's passed in form of RAW Bytes
+        elif isinstance(Input,bytes):
+            image=Image.open(io.BytesIO(Input)).convert("RGB")
+
+        else:
+            raise TypeError(f"Image format not supported: {type(Input)}")
         ## Preprocess the image using processor 
         ## And convert the image into a 4 dimensional matrix (tensor )in format compatible with pytorch (pt)
         ## Returns [Batch_Size, Channels, Height, Width] as matrix
@@ -178,13 +192,14 @@ class LoadModels:
         ## Decode the IDs into characters and extract text from the output list
         OutputText=self.TrOCR["processor"].batch_decode(GeneratedIDs,skip_special_tokens=True)[0]
         return OutputText
-        
 
 if __name__ == "__main__":
     start=time.perf_counter()
     Object=LoadModels()
     LoadTime=time.perf_counter()
-    testText=Object.OCR()
+    with open("Sample2.png","rb") as f:
+        buffer=io.BytesIO(f.read())
+    testText=Object.OCR(buffer)
     OCRTime=time.perf_counter()
     test=Object.Translator([testText])
     translationTime=time.perf_counter()
@@ -196,5 +211,5 @@ if __name__ == "__main__":
     sd.play(Content,samplerate=sampleRate)
     print(f"Sample Rate:{sampleRate}")
     sd.wait()
-    print(f"Time to Load models:{LoadTime-start}\nOCR Time:{OCRTime-LoadTime}\nTranslation Time: {translationTime-LoadTime}\nTTS Time:{TTSTime-translationTime}")
+    print(f"Time to Load models: {LoadTime-start}\nOCR Time: {OCRTime-LoadTime}\nTranslation Time: {translationTime-LoadTime}\nTTS Time: {TTSTime-translationTime}")
     
