@@ -145,7 +145,7 @@ class LoadModels:
             ## Check if audio was generated
             if len(Audio.samples)>0:
                 ## Trim the samples from the list to remove the noise from the end
-                TrimSize=int(Audio.sample_rate*0.456)
+                TrimSize=int(Audio.sample_rate*0.0156)
                 ## Generate audio in RAM
                 AudioBuffer=io.BytesIO()
                 ## Write audio into a Wav format for sending
@@ -188,7 +188,7 @@ class LoadModels:
         ## Returns [Batch_Size, Channels, Height, Width] as matrix
         pixels=self.TrOCR["processor"](images=image,return_tensors="pt").pixel_values
         ## Generate integer IDs from the image
-        GeneratedIDs=self.TrOCR["model"].generate(pixels)
+        GeneratedIDs=self.TrOCR["model"].generate(pixels,num_beams=1,max_new_tokens=24)
         ## Decode the IDs into characters and extract text from the output list
         OutputText=self.TrOCR["processor"].batch_decode(GeneratedIDs,skip_special_tokens=True)[0]
         return OutputText
@@ -197,10 +197,11 @@ if __name__ == "__main__":
     start=time.perf_counter()
     Object=LoadModels()
     LoadTime=time.perf_counter()
-    with open("Sample2.png","rb") as f:
+    with open("Sample1.jpeg","rb") as f:
         buffer=io.BytesIO(f.read())
     testText=Object.OCR(buffer)
     OCRTime=time.perf_counter()
+    print(testText)
     test=Object.Translator([testText])
     translationTime=time.perf_counter()
     print(test[0])
