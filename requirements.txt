@@ -84,7 +84,9 @@ nvidia-nvshmem-cu13==3.4.5
 nvidia-nvtx==13.0.85
 onnxruntime==1.23.2
 opencv-python==5.0.0.93
+opt-einsum==3.3.0
 packaging==26.3
+paddlepaddle==3.2.0
 pandas==2.3.3
 parso==0.8.7
 peft==0.20.0
