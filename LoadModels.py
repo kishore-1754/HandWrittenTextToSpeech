@@ -1,4 +1,4 @@
-## Writing a class that contains methods to load and return all 3 models.
+## Writing a class that contains methods to load and return all 4 models.
 
 ## Time module for optimization
 import time
@@ -9,6 +9,7 @@ import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
 from IndicTransToolkit import IndicProcessor
+import cv2
 
 ## Module imports for VITS-RASA TTS model
 import io
@@ -20,7 +21,8 @@ import sounddevice as sd
 from PIL import Image
 from transformers import TrOCRProcessor,VisionEncoderDecoderModel
 
-
+## Module imports for PaddleOCR => For line extraction
+from paddleocr import TextDetection
 class LoadModels:
     ## Defining base path for portability
     BaseDirectory=os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +39,7 @@ class LoadModels:
         self.Indic=self.IndicLoader()
         self.TrOCR=self.LoadOCR()
         self.Rasa=self.RasaLoader()
+        self.Paddle=self.PaddleLoader()
 
     ## INDIC Model Loader
     def IndicLoader(self):
@@ -193,17 +196,98 @@ class LoadModels:
         OutputText=self.TrOCR["processor"].batch_decode(GeneratedIDs,skip_special_tokens=True)[0]
         return OutputText
 
+#_____________________________________________________________________________________________________________________________________________________________
+    PaddlePath=os.path.join(BaseDirectory,"models","Paddle","official_models","PP-OCRv6_medium_det")
+    ## Method to load PaddleOCR model for Linedetection
+    ## Defining the PaddleOCR model path
+    def PaddleLoader(self):
+        ## disable the model from detecting lines vertically, language= english and disable text recognition since the model is mainly used for printed text
+        return TextDetection(model_dir=self.PaddlePath)
+
+    ## Method to use PaddleOCR model to detectlines
+    def ExtractLines(self,Input):
+        ## Load from path
+        if isinstance(Input,str):
+            image=Image.open(Input).convert("RGB")
+        ## Load image from Bytes / Buffer object format -> convert to grid and then convert the it to image 
+        elif isinstance(Input,(bytes,io.BytesIO)):
+            if isinstance(Input,io.BytesIO):
+                ## Convert the Buffer IO to buffer object
+                Input.seek(0)
+                Input=Input.getbuffer() ## Data in RAM
+            ## Convert to np array
+            Arr=np.frombuffer(Input,np.uint8)
+            image=cv2.imdecode(Arr,cv2.IMREAD_COLOR)
+            if image is None:
+                return [] ## Return empty list if image conversion failed
+            image=cv2.cvtColor(image,cv2.COLOR_BGR2RGB)
+            ## Convert to RGB image
+        else:
+            raise RuntimeError("Input image format not supported")
+
+        ## Return nothing if image is empty / invalid
+        if image is None:
+            return []
+
+        ## Extract lines crop coordinates using the Model
+        CoordsJSONObject=self.Paddle.predict(image) ## It returns a json object with 4 coordinates
+        ## Can contain more than coords of more than one file
+        ## Crop the images using the coordinates
+        if not CoordsJSONObject:
+            return [] ## Return empty list if there are no text lines in images
+        ## Uncomment the below line if you wish to see the JSON Object
+                #  print(CoordsJSON)
+        ## Obtain the coordinates from the object
+        for result in CoordsJSONObject:
+            LineMetadata=result.json.get("res",{}) ## get the res value from json or return empty dict if doesn't exist
+            ## Obtain the coordinates of each line
+            CropCoordinates=LineMetadata.get("dt_polys",[])
+
+        ## Check if the CropCoordinates is empty
+        if CropCoordinates is None or len(CropCoordinates)==0:
+            return []
+        ## Sort the coordinates because the model returns the coords by inserting them to beginning as the image is scanned
+        ## Sorted wrt ordinate (y) value
+        CropCoordinates = sorted(CropCoordinates,key=lambda Crops: min(int(coord[1]) for coord in Crops))
+        ## Extract image parameters
+        TotalHeight,Totalwidth=image.shape[:2] ## Image format is always in (abscissa,ordinate,channel)
+
+        Lines=list()
+        for coords in CropCoordinates:
+            points=np.asarray(coords,dtype=np.int32) ## Convert the list into an array because OpenCV might throw error
+            StartAbscissa,StartOrdinate,Width,Height=cv2.boundingRect(points)
+            EndAbscissa=StartAbscissa+Width
+            EndOrdinate=StartOrdinate+Height
+
+            ## Crop the image using the coordinates
+            Crop=image[StartOrdinate:EndOrdinate,StartAbscissa:EndAbscissa]
+
+            if Crop.size== 0:
+                continue ## Check if cropped image is 0x0
+
+            ## Encode the images as png
+            success,ImageEncoded=cv2.imencode(".jpg",Crop,[cv2.IMWRITE_JPEG_QUALITY,95]) ## Encode as jpeg with 5% loss 
+            if not success:
+                raise RuntimeError("Can't encode crops")
+            Lines.append(ImageEncoded.tobytes()) ## Append result as a byte object
+        return Lines
+            
+
 if __name__ == "__main__":
     start=time.perf_counter()
     Object=LoadModels()
     LoadTime=time.perf_counter()
-    with open("Sample1.jpeg","rb") as f:
+    with open("Sample.jpg","rb") as f:
         buffer=io.BytesIO(f.read())
-    testText=Object.OCR(buffer)
-    OCRTime=time.perf_counter()
-    print(testText)
-    test=Object.Translator([testText])
-    translationTime=time.perf_counter()
+    Lines=Object.ExtractLines(buffer)
+    ExtractedText=list()
+    for image in Lines:
+        testText=Object.OCR(image)
+        ExtractedText.append(testText)
+    # OCRTime=time.perf_counter()
+    print(ExtractedText)
+    test=Object.Translator([" ".join(ExtractedText)])
+    # translationTime=time.perf_counter()
     print(test[0])
     ## Get data from the Buffer
     Content,sampleRate=sf.read(Object.SpeechSynthesize(Input=test[0]))
@@ -212,5 +296,5 @@ if __name__ == "__main__":
     sd.play(Content,samplerate=sampleRate)
     print(f"Sample Rate:{sampleRate}")
     sd.wait()
-    print(f"Time to Load models: {LoadTime-start}\nOCR Time: {OCRTime-LoadTime}\nTranslation Time: {translationTime-LoadTime}\nTTS Time: {TTSTime-translationTime}")
+    # print(f"Time to Load models: {LoadTime-start}\nOCR Time: {OCRTime-LoadTime}\nTranslation Time: {translationTime-LoadTime}\nTTS Time: {TTSTime-translationTime}")
     
