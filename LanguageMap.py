@@ -50,5 +50,9 @@ Languages = {
     "Telugu": {
         "LangCode": "tel_Telu",
         "SpeakerID": {"female": 19}
+    },
+    "Hindi":{
+        "LangCode":"hin_Deva",
+        "SpeakerID":{"female":12,"male":13}
     }
 }
