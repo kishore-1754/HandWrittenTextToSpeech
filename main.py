@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI,UploadFile,File,Form,HTTPException
+from fastapi import FastAPI,UploadFile,File,Form,Response
 from LoadModels import LoadModels
 from fastapi.responses import FileResponse
 from LanguageMap import Languages
@@ -51,22 +51,29 @@ async def ImgToSpeech(Input:UploadFile=File(...),TargetLanguage:str=Form(...)): 
     Models=app.state.models
     TranslatedText=list()
     ExtractedText=list()
-    ## Get and process images sent
-    # for image in Input:
-        ## Get each image sent via request as Bytes Object
+    ## Get each image sent via request as Bytes Object
     Img=await Input.read()
-    Text=Models.OCR(Img)
-    if Text.strip():
-        ExtractedText.append(Text) ## Append the text obtained from the image
+    ## Get Individual lines of text
+    ListOfLines=Models.ExtractLines(Img)
+    for Line in ListOfLines:
+        Text=Models.OCR(Line)
+        if Text.strip():
+            ExtractedText.append(Text) ## Append the text obtained from the image
     ## Join the list of strings into one string so that model retains context
     FinalText=" ".join(ExtractedText)
     print(FinalText)
     ## Translate the text into required language
     TranslatedText=Models.Translator([FinalText],targetLang=TargetCode,maxTokens=500)
-    print(TranslatedText)
     ## Pass the translated text into audio
     audioBuffer=Models.SpeechSynthesize(TranslatedText[0],speakerID=SpeakerID)
-    ## Convert the audio file into a base64 ASCII byte object and then convert it to a utf-8 string
-    audioBase64=base64.b64encode(audioBuffer.getvalue()).decode("utf-8")
-    ## Return the final response
-    return {"TranslatedText":TranslatedText,"audioText":audioBase64}
+    ## Convert the audioBuffer into Bytes
+    audioBytes=audioBuffer.getvalue()
+    ## Convert the translated text to utf-8 format
+    UtfTranslatedText=TranslatedText[0].encode("utf-8")
+    ## Create a custom response body, lengths are stored in 4 Byte integers (In Big Endian format)
+    ## The text and audio are stored converted to Byte format
+    ResponseBody=(len(UtfTranslatedText).to_bytes(4,"big")+len(audioBytes).to_bytes(4,"big")+UtfTranslatedText+audioBytes)
+    ## Return the binary object as response
+    return Response(content=ResponseBody, media_type="application/octet-stream")
+
+        

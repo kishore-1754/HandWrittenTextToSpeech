@@ -148,7 +148,7 @@ class LoadModels:
             ## Check if audio was generated
             if len(Audio.samples)>0:
                 ## Trim the samples from the list to remove the noise from the end
-                TrimSize=int(Audio.sample_rate*0.0156)
+                TrimSize=int(Audio.sample_rate*0.0556)
                 ## Generate audio in RAM
                 AudioBuffer=io.BytesIO()
                 ## Write audio into a Wav format for sending
