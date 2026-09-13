@@ -44,7 +44,7 @@ class LoadModels:
     ## INDIC Model Loader
     def IndicLoader(self):
         ## processor for text preprocessing
-        procssor=IndicProcessor(inference=True)
+        processor=IndicProcessor(inference=True)
         '''Consider something like 'hello   world' and 'hello world' both aren't the same
            Hence such sentences have to be preprocessed'''
         ## Import tokenizer -> The tokenizer breaks the sentence into tokens and assigns them IDs based on the vocabulary
@@ -58,13 +58,13 @@ class LoadModels:
         ## Encoder for English using ORT (Onnx runtime)
         encoder=ort.InferenceSession(os.path.join(self.IndicPath,"encoder_model.onnx"),providers=["CPUExecutionProvider"])
 
-        ## Decoder for Indic (Kannada) 
+        ## Decoder for Indic language 
         decoder=ort.InferenceSession(os.path.join(self.IndicPath,"decoder_model.onnx"),providers=["CPUExecutionProvider"])
         ## Uncomment the below line if you want to see the vocabulary size
         # print(metaData)
 
         ## Return the model processor, tokenizers, encoder and decoder.
-        return {"encoder":encoder,"decoder":decoder,"processor":procssor,"srcTokenizer":srcTokenizer,"tgtTokenizer":targetTokenizer}
+        return {"encoder":encoder,"decoder":decoder,"processor":processor,"srcTokenizer":srcTokenizer,"tgtTokenizer":targetTokenizer}
 
     def Translator(self,Input:list[str],maxTokens=160,sourceLang="eng_Latn",targetLang="kan_Knda"):
         ## preprocess the input string in batches
@@ -91,7 +91,7 @@ class LoadModels:
             decoderIDs=np.array([[decoderStartID]],dtype=np.int64)
             generatedTokens=[]
             
-            for itertation in range(maxTokens):
+            for iteration in range(maxTokens):
                 decoderOutput=self.Indic["decoder"].run(None,{"input_ids":decoderIDs,"encoder_hidden_states":encoderOutput,"encoder_attention_mask":attentionMask})
                 ## Obtain a list of scores for each word ID that model knows
                 logits=decoderOutput[0]
@@ -242,7 +242,7 @@ class LoadModels:
             LineMetadata=result.json.get("res",{}) ## get the res value from json or return empty dict if doesn't exist
             ## Obtain the coordinates of each line
             CropCoordinates=LineMetadata.get("dt_polys",[])
-
+        print(CoordsJSONObject)
         ## Check if the CropCoordinates is empty
         if CropCoordinates is None or len(CropCoordinates)==0:
             return []

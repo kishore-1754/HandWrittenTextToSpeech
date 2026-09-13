@@ -1,11 +1,8 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI,UploadFile,File,Form,Response
+from fastapi import FastAPI,UploadFile,File,Form,Request,Response,HTTPException
 from LoadModels import LoadModels
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from LanguageMap import Languages
-import base64
-from typing import List
-# from DetectLines import ExtractLines
 from fastapi.middleware.cors import CORSMiddleware
 
 ## function to load models  once when server starts using lifespan
@@ -31,13 +28,29 @@ app.add_middleware(
     allow_headers=["*"] ## Allow all types of headers
 )
 
+## Function to stream responses insted of sending a large HTTP response (for low resource devices)
+async def stream(TranslatedText:str,audioBuffer):
+    ## Send the translated text in first field
+    TextInByteForm=TranslatedText.encode("utf-8")
+    ## Start the audio pointer @ the start
+    audioBuffer.seek(0)
+    ## Convert to a byte object, add its length in big endian format
+    yield(b"TEXT"+len(TextInByteForm).to_bytes(4,"big")+TextInByteForm)
+    ## Convert the audio into multiple fields for streaming
+    while True:
+        AudioChunk=audioBuffer.read(1024*5) ## Read and send 5KB for each pass
+        if not AudioChunk: ## If audio is empty stop
+            yield b"END"
+            break
+        ## Else prepare the audio for streaming
+        yield(b"AUDIO"+len(AudioChunk).to_bytes(4,"big")+AudioChunk)
+    
 @app.get("/")
 async def home():
     return FileResponse("index.html")
 ## Post API
-@app.post("/ITS")
-# async def ImgToSpeech(Input:List[UploadFile]=File(...),TargetLanguage:str=Form(...)):
-async def ImgToSpeech(Input:UploadFile=File(...),TargetLanguage:str=Form(...)): ## Single file format
+@app.post("/TTIS")
+async def ImgToSpeech(request:Request,Input:UploadFile=File(...),TargetLanguage:str=Form(...)): ## Single file format input and get the client type, and target language
     TargetCode=app.state.LanguageMap[TargetLanguage]["LangCode"]
     Speaker=app.state.LanguageMap[TargetLanguage]["SpeakerID"]
     # ExtractedImage=app.state.Extractor(input)
@@ -55,25 +68,37 @@ async def ImgToSpeech(Input:UploadFile=File(...),TargetLanguage:str=Form(...)): 
     Img=await Input.read()
     ## Get Individual lines of text
     ListOfLines=Models.ExtractLines(Img)
+    ## Error check (If Image doesn't have any text / lines)
+    if ListOfLines == []:
+        raise HTTPException(status_code=400,detail="No lines found in the image")
     for Line in ListOfLines:
         Text=Models.OCR(Line)
         if Text.strip():
             ExtractedText.append(Text) ## Append the text obtained from the image
     ## Join the list of strings into one string so that model retains context
     FinalText=" ".join(ExtractedText)
-    print(FinalText)
+    ## Raise error if no string length is empty
+    if not FinalText:
+        raise HTTPException(status_code=400,detail="OCR didn't find any text")
     ## Translate the text into required language
     TranslatedText=Models.Translator([FinalText],targetLang=TargetCode,maxTokens=500)
     ## Pass the translated text into audio
     audioBuffer=Models.SpeechSynthesize(TranslatedText[0],speakerID=SpeakerID)
-    ## Convert the audioBuffer into Bytes
-    audioBytes=audioBuffer.getvalue()
-    ## Convert the translated text to utf-8 format
-    UtfTranslatedText=TranslatedText[0].encode("utf-8")
-    ## Create a custom response body, lengths are stored in 4 Byte integers (In Big Endian format)
-    ## The text and audio are stored converted to Byte format
-    ResponseBody=(len(UtfTranslatedText).to_bytes(4,"big")+len(audioBytes).to_bytes(4,"big")+UtfTranslatedText+audioBytes)
-    ## Return the binary object as response
-    return Response(content=ResponseBody, media_type="application/octet-stream")
+    ## Check the client type
+    Type=request.headers.get("X-Client-Type")
+    ## If Client is ESP32. Stream the audio response
+    if Type=="esp32":
+    ## Return the audio progressively to prevent out of memory error in ESP32 device
+        return StreamingResponse(stream(TranslatedText=TranslatedText[0],audioBuffer=audioBuffer),media_type="application/octet-stream")
+    else:
+        ## Convert the audioBuffer into Bytes
+        audioBytes=audioBuffer.getvalue()
+        ## Convert the translated text to utf-8 format
+        UtfTranslatedText=TranslatedText[0].encode("utf-8")
+        ## Create a custom response body, lengths are stored in 4 Byte integers (In Big Endian format)
+        ## The text and audio are stored converted to Byte format
+        ResponseBody=(len(UtfTranslatedText).to_bytes(4,"big")+len(audioBytes).to_bytes(4,"big")+UtfTranslatedText+audioBytes)
+        ## Return the binary object as response
+        return Response(content=ResponseBody, media_type="application/octet-stream")
 
         
